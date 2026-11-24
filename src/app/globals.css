@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+:root {
+  --brand: #1f3864;
+  --brand-light: #ddebf7;
+}
+
+body {
+  background: #f5f7fb;
+  color: #1f2937;
+}
+
+/* Tailwind 4 defaults borders to currentColor; keep the soft slate look used across the app. */
+@layer base {
+  *, ::after, ::before, ::backdrop {
+    border-color: var(--color-slate-200, #e2e8f0);
+  }
+}
+
+@media print {
+  @page { size: A4; margin: 12mm; }
+}

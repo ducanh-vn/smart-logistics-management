@@ -1,0 +1,254 @@
+// SLMS data model – follows "Tài liệu thiết kế hệ thống" (SLMS-TK-01), section 4.
+// Status/role fields are plain strings; allowed values live in src/constants.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled connection used by the app
+  directUrl = env("DIRECT_URL") // direct connection used by prisma db push
+}
+
+model User {
+  id                 Int       @id @default(autoincrement())
+  username           String    @unique
+  passwordHash       String
+  fullName           String
+  role               String // ADMIN | MANAGER | DISPATCHER | STOREKEEPER | DRIVER
+  failedLogins       Int       @default(0)
+  lockedUntil        DateTime?
+  mustChangePassword Boolean   @default(false)
+  active             Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  driver             Driver?
+  auditLogs          AuditLog[]
+}
+
+model Customer {
+  id      Int     @id @default(autoincrement())
+  code    String  @unique
+  name    String
+  phone   String
+  address String
+  orders  Order[]
+}
+
+model Warehouse {
+  id        Int        @id @default(autoincrement())
+  code      String     @unique
+  name      String
+  address   String
+  lat       Float
+  lng       Float
+  locations Location[]
+  orders    Order[]
+  documents StockDocument[]
+  trips     Trip[]
+}
+
+model Location {
+  id          Int         @id @default(autoincrement())
+  code        String // e.g. A-01-03 (zone-rack-slot)
+  warehouseId Int
+  warehouse   Warehouse   @relation(fields: [warehouseId], references: [id])
+  stockItems  StockItem[]
+
+  @@unique([warehouseId, code])
+}
+
+model StockItem {
+  id         Int      @id @default(autoincrement())
+  locationId Int
+  location   Location @relation(fields: [locationId], references: [id])
+  barcode    String
+  name       String
+  quantity   Int      @default(0)
+  minQty     Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@unique([locationId, barcode])
+}
+
+model StockDocument {
+  id          Int         @id @default(autoincrement())
+  code        String      @unique
+  type        String // RECEIPT | ISSUE | STOCKTAKE
+  status      String      @default("DONE") // DRAFT | PENDING | DONE
+  warehouseId Int
+  warehouse   Warehouse   @relation(fields: [warehouseId], references: [id])
+  tripId      Int?
+  trip        Trip?       @relation(fields: [tripId], references: [id])
+  createdBy   String
+  createdAt   DateTime    @default(now())
+  lines       StockLine[]
+}
+
+model StockLine {
+  id         Int           @id @default(autoincrement())
+  documentId Int
+  document   StockDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  barcode    String
+  name       String
+  quantity   Int // signed difference for STOCKTAKE
+  locationId Int?
+}
+
+model Order {
+  id             Int              @id @default(autoincrement())
+  code           String           @unique
+  customerId     Int
+  customer       Customer         @relation(fields: [customerId], references: [id])
+  warehouseId    Int
+  warehouse      Warehouse        @relation(fields: [warehouseId], references: [id])
+  receiverName   String
+  receiverPhone  String
+  address        String
+  district       String
+  zone           String // URBAN | SUBURBAN | INTERPROVINCE
+  lat            Float
+  lng            Float
+  weightKg       Float
+  volumeM3       Float
+  fee            Int
+  status         String           @default("PENDING")
+  failedAttempts Int              @default(0)
+  expectedDate   DateTime
+  createdAt      DateTime         @default(now())
+  items          OrderItem[]
+  history        OrderStatusLog[]
+  stops          Stop[]
+}
+
+model OrderItem {
+  id       Int    @id @default(autoincrement())
+  orderId  Int
+  order    Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  name     String
+  barcode  String
+  weightKg Float
+  quantity Int    @default(1)
+}
+
+model OrderStatusLog {
+  id        Int      @id @default(autoincrement())
+  orderId   Int
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status    String
+  note      String?
+  actor     String
+  createdAt DateTime @default(now())
+}
+
+model Vehicle {
+  id            Int               @id @default(autoincrement())
+  plate         String            @unique
+  type          String
+  capacityKg    Float
+  capacityM3    Float
+  status        String            @default("READY") // READY | ON_TRIP | MAINTENANCE
+  nextServiceAt DateTime
+  trips         Trip[]
+  positions     VehiclePosition[]
+}
+
+model Driver {
+  id         Int     @id @default(autoincrement())
+  code       String  @unique
+  fullName   String
+  phone      String
+  licenseNo  String
+  shift      String // MORNING | AFTERNOON
+  userId     Int?    @unique
+  user       User?   @relation(fields: [userId], references: [id])
+  trips      Trip[]
+}
+
+model Trip {
+  id          Int             @id @default(autoincrement())
+  code        String          @unique
+  date        DateTime
+  warehouseId Int
+  warehouse   Warehouse       @relation(fields: [warehouseId], references: [id])
+  vehicleId   Int
+  vehicle     Vehicle         @relation(fields: [vehicleId], references: [id])
+  driverId    Int
+  driver      Driver          @relation(fields: [driverId], references: [id])
+  totalKg     Float
+  totalKm     Float
+  status      String          @default("NEW") // NEW | DISPATCHED | RUNNING | DONE
+  createdAt   DateTime        @default(now())
+  stops       Stop[]
+  documents   StockDocument[]
+}
+
+model Stop {
+  id         Int       @id @default(autoincrement())
+  tripId     Int
+  trip       Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  orderId    Int
+  order      Order     @relation(fields: [orderId], references: [id])
+  seq        Int
+  eta        DateTime?
+  otpHash    String?
+  otpSentAt  DateTime?
+  otpOk      Boolean   @default(false)
+  otpTries   Int       @default(0)
+  doneLat    Float?
+  doneLng    Float?
+  photoUrl   String?
+  failReason String?
+  doneAt     DateTime?
+
+  @@unique([tripId, orderId])
+}
+
+model VehiclePosition {
+  id         Int      @id @default(autoincrement())
+  vehicleId  Int
+  vehicle    Vehicle  @relation(fields: [vehicleId], references: [id])
+  lat        Float
+  lng        Float
+  speedKmh   Float    @default(0)
+  recordedAt DateTime @default(now())
+
+  @@index([vehicleId, recordedAt])
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String
+  oldValue  String?
+  newValue  String?
+  createdAt DateTime @default(now())
+}
+
+model PriceRule {
+  id         Int    @id @default(autoincrement())
+  zone       String @unique // URBAN | SUBURBAN | INTERPROVINCE
+  baseFee    Int // VND for weight up to includedKg
+  includedKg Float
+  perKgFee   Int // VND for each extra kg (rounded up)
+}
+
+model Setting {
+  key   String @id
+  value String
+}
+
+/// FR27 – SMS sent to customers. The demo only logs them (no paid SMS gateway).
+model SmsMessage {
+  id        Int      @id @default(autoincrement())
+  phone     String
+  content   String
+  orderId   Int?
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+  @@index([orderId])
+}
